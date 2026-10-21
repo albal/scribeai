@@ -6,9 +6,11 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "ScribeCore", targets: ["ScribeCore"]),
+        .executable(name: "prompt-harness", targets: ["PromptHarness"]),
     ],
     targets: [
         .target(name: "ScribeCore"),
-        .testTarget(name: "ScribeCoreTests", dependencies: ["ScribeCore"]),
+        .executableTarget(name: "PromptHarness", dependencies: ["ScribeCore"]),
+        .testTarget(name: "ScribeCoreTests", dependencies: ["ScribeCore", "PromptHarness"]),
     ]
 )
