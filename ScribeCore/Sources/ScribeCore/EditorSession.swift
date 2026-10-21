@@ -19,6 +19,21 @@ public enum Scope: String, CaseIterable, Identifiable, Sendable {
     public var name: String { rawValue.capitalized }
 }
 
+/// The written explanation of why one Gauge shows its Reading. It diagnoses; it never rewrites.
+public struct Critique: Equatable, Sendable {
+    public let gauge: Gauge
+    /// The Readings the writer clicked; the Critique keeps explaining these even as the text changes.
+    public let readings: Readings
+    /// The text the Critique describes.
+    public let unit: EvaluationUnit
+    /// Grows as the model writes.
+    public internal(set) var text = ""
+    public internal(set) var isComplete = false
+    /// The text it describes has since changed.
+    public internal(set) var isOutOfDate = false
+    public internal(set) var failure: EvaluationFailure?
+}
+
 /// The editor's view of ScribeCore: feed it text, cursor and Target; observe Readings.
 @MainActor @Observable
 public final class EditorSession {
@@ -37,6 +52,8 @@ public final class EditorSession {
         didSet { if scope != oldValue { refresh() } }
     }
 
+    public private(set) var critique: Critique?
+
     /// The Scope actually being evaluated, nil when nothing under the cursor can be.
     public private(set) var activeUnit: EvaluationUnit?
 
@@ -50,6 +67,8 @@ public final class EditorSession {
     @ObservationIgnored public var model: any ModelClient
     @ObservationIgnored private let startPause: PauseStarter
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var critiqueTask: Task<Void, Never>?
+    @ObservationIgnored private var critiqueID = 0
 
     /// Identifies an Evaluation: the same text against the same Target always gets the same Readings.
     private struct EvaluationKey: Hashable {
@@ -90,6 +109,9 @@ public final class EditorSession {
     /// The writer edited the text.
     public func textDidChange(_ text: String, selection: Range<Int>) {
         self.text = text
+        if let unit = critique?.unit {
+            critique?.isOutOfDate = !describesCurrentText(unit)
+        }
         select(selection)
     }
 
@@ -118,6 +140,56 @@ public final class EditorSession {
         shownKey = nil
         refresh()
     }
+
+    // MARK: Critique
+
+    /// Explains the Reading `gauge` shows. Only one model request runs at a time, and a Critique
+    /// goes first: any Evaluation in progress is cancelled and resumes afterwards.
+    public func requestCritique(of gauge: Gauge) {
+        guard let readings, let key = shownKey else { return }
+        cancelPending()
+        status = currentUnit.map { EvaluationKey(unit: $0, target: target) } == shownKey ? .idle : .pending
+
+        critiqueTask?.cancel()
+        critiqueID += 1
+        let id = critiqueID
+        critique = Critique(gauge: gauge, readings: readings, unit: key.unit)
+        let stream = model.critique(PromptBuilder.critique(of: gauge, readings: readings, unit: key.unit, target: key.target))
+        critiqueTask = Task {
+            do {
+                for try await chunk in stream {
+                    guard !Task.isCancelled else { return }
+                    self.critique?.text += chunk
+                }
+                guard !Task.isCancelled else { return }
+                self.critique?.isComplete = true
+            } catch {
+                guard !Task.isCancelled, !(error is CancellationError) else { return }
+                self.critique?.failure = error as? EvaluationFailure ?? .other(String(describing: error))
+            }
+            self.critiqueDidEnd(id)
+        }
+    }
+
+    public func closeCritique() {
+        critiqueTask?.cancel()
+        critique = nil
+        critiqueDidEnd(critiqueID)
+    }
+
+    private func critiqueDidEnd(_ id: Int) {
+        guard id == critiqueID else { return }
+        critiqueTask = nil
+        pendingKey = nil
+        refresh()
+    }
+
+    private func describesCurrentText(_ unit: EvaluationUnit) -> Bool {
+        if case .selection(let selected) = unit { return text.contains(selected) }
+        return MarkdownSegmenter.paragraphs(in: text).contains { $0.text.contains(unit.text) }
+    }
+
+    // MARK: Evaluation
 
     private var currentUnit: EvaluationUnit? {
         if !selection.isEmpty {
@@ -192,6 +264,11 @@ public final class EditorSession {
     }
 
     private func evaluate(_ key: EvaluationKey) async {
+        // One model request at a time: wait for a Critique to finish.
+        while let critiqueTask {
+            await critiqueTask.value
+            guard !Task.isCancelled else { return }
+        }
         status = .evaluating
         let prompt = PromptBuilder.evaluation(of: key.unit, target: key.target)
         do {

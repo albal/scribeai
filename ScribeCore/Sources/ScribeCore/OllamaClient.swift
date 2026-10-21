@@ -161,6 +161,49 @@ public struct OllamaClient: ModelClient {
         let tone: String
     }
 
+    // MARK: Critique
+
+    public func critique(_ prompt: CritiquePrompt) -> AsyncThrowingStream<String, any Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let body: [String: Any] = [
+                        "model": model,
+                        "stream": true,
+                        "options": ["temperature": 0.4],
+                        "messages": [
+                            ["role": "system", "content": prompt.system],
+                            ["role": "user", "content": prompt.user],
+                        ],
+                    ]
+                    var request = URLRequest(url: baseURL.appending(path: "api/chat"))
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    let (bytes, response) = try await session.bytes(for: request)
+                    try Self.check(response)
+                    for try await line in bytes.lines where !line.isEmpty {
+                        let chunk = try JSONDecoder().decode(ChatChunk.self, from: Data(line.utf8))
+                        if let error = chunk.error { throw EvaluationFailure.other(error) }
+                        if let content = chunk.message?.content, !content.isEmpty { continuation.yield(content) }
+                        if chunk.done == true { break }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: Self.mapFailure(error))
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    struct ChatChunk: Decodable {
+        struct Message: Decodable { let content: String }
+        let message: Message?
+        let done: Bool?
+        let error: String?
+    }
+
     // MARK: Errors
 
     static func check(_ response: URLResponse) throws {
@@ -174,7 +217,7 @@ public struct OllamaClient: ModelClient {
     }
 
     static func mapFailure(_ error: any Error) -> any Error {
-        if error is CancellationError { return error }
+        if error is CancellationError || error is EvaluationFailure { return error }
         switch error {
         case let error as URLError where error.code == .cancelled:
             return CancellationError()

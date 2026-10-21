@@ -34,8 +34,15 @@ struct GaugePane: View {
                     .font(.callout)
                     .foregroundStyle(.orange)
             }
-            gauges
-            Spacer()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    gauges
+                    if let critique = session.critique {
+                        CritiquePanel(critique: critique, close: session.closeCritique)
+                    }
+                }
+            }
+            .scrollIndicators(.automatic)
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -44,19 +51,41 @@ struct GaugePane: View {
 
     private var gauges: some View {
         VStack(alignment: .leading, spacing: 16) {
-            AlignmentGauge(readings: readings)
-            ScaleGauge(
-                title: "Concision", symbol: "✂️", value: readings?.concision,
-                lowLabel: "Bloated", highLabel: "Tight", judging: true
-            )
-            ScaleGauge(
-                title: "Intensity", symbol: "🌡️", value: readings?.intensity,
-                lowLabel: "Restrained", highLabel: "Purple", judging: false
-            )
-            ToneGauge(tone: readings?.tone)
+            critiqueButton(.alignment) { AlignmentGauge(readings: readings) }
+            critiqueButton(.concision) {
+                ScaleGauge(
+                    title: "Concision", symbol: "✂️", value: readings?.concision,
+                    lowLabel: "Bloated", highLabel: "Tight", judging: true
+                )
+            }
+            critiqueButton(.intensity) {
+                ScaleGauge(
+                    title: "Intensity", symbol: "🌡️", value: readings?.intensity,
+                    lowLabel: "Restrained", highLabel: "Purple", judging: false
+                )
+            }
+            critiqueButton(.tone) { ToneGauge(tone: readings?.tone) }
         }
         .opacity(isStale && readings != nil ? 0.45 : 1)
         .animation(.easeInOut(duration: 0.2), value: isStale)
+    }
+
+    /// Clicking a Gauge asks for a Critique of its Reading.
+    private func critiqueButton(_ gauge: ScribeCore.Gauge, @ViewBuilder _ content: () -> some View) -> some View {
+        Button {
+            session.requestCritique(of: gauge)
+        } label: {
+            content()
+                .overlay {
+                    if session.critique?.gauge == gauge {
+                        RoundedRectangle(cornerRadius: 10).strokeBorder(.tint, lineWidth: 2)
+                    }
+                }
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(readings == nil)
+        .help(readings == nil ? "" : "Explain this \(gauge.name) Reading")
     }
 
     private var header: some View {
@@ -180,5 +209,55 @@ private func judgingColor(_ value: Int) -> Color {
     case 80...: .green
     case 60..<80: .orange
     default: .red
+    }
+}
+
+/// The written explanation of one Gauge's Reading. It can be read but never applied to the Document.
+private struct CritiquePanel: View {
+    let critique: Critique
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Critique · \(critique.gauge.name)")
+                    .font(.subheadline.weight(.semibold))
+                if critique.isOutOfDate {
+                    Text("Out of date")
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.yellow.opacity(0.25), in: .capsule)
+                        .help("The text this Critique describes has changed since")
+                }
+                Spacer()
+                if !critique.isComplete, critique.failure == nil {
+                    ProgressView().controlSize(.small)
+                }
+                Button(action: close) {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close the Critique")
+            }
+            Text(critique.gauge.describe(critique.readings))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if critique.text.isEmpty, critique.failure == nil {
+                Text("Thinking…").foregroundStyle(.secondary)
+            } else {
+                Text(critique.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let failure = critique.failure {
+                Label(failure.message, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: .rect(cornerRadius: 10))
+        .opacity(critique.isOutOfDate ? 0.6 : 1)
     }
 }

@@ -82,6 +82,35 @@ struct OllamaClientTests {
         await #expect(throws: CancellationError.self) { try await task.value }
     }
 
+    // MARK: Critique
+
+    @Test func critiqueStreamsChatContent() async throws {
+        let lines = [
+            ["message": ["role": "assistant", "content": "The register "], "done": false],
+            ["message": ["role": "assistant", "content": "is too casual."], "done": false],
+            ["message": ["role": "assistant", "content": ""], "done": true],
+        ]
+        let body = lines.map { String(decoding: json($0), as: UTF8.self) }.joined(separator: "\n")
+        let (client, baseURL) = client { _ in .response(status: 200, body: Data(body.utf8)) }
+
+        var chunks: [String] = []
+        for try await chunk in client.critique(CritiquePrompt(system: "s", user: "u")) { chunks.append(chunk) }
+
+        #expect(chunks == ["The register ", "is too casual."])
+        let request = try #require(StubURLProtocol.requests(to: baseURL).first)
+        #expect(request.url?.path() == "/api/chat")
+        let requestBody = try #require(request.jsonBody)
+        #expect(requestBody["stream"] as? Bool == true)
+        #expect(requestBody["format"] == nil)
+    }
+
+    @Test func critiqueReportsAnUnreachableServer() async {
+        let (client, _) = client { _ in .failure(.cannotConnectToHost) }
+        await #expect(throws: EvaluationFailure.ollamaNotRunning) {
+            for try await _ in client.critique(CritiquePrompt(system: "s", user: "u")) {}
+        }
+    }
+
     // MARK: Status
 
     @Test(arguments: [

@@ -7,6 +7,8 @@ public protocol ModelClient: Sendable {
     /// Downloads the model, reporting progress until it completes.
     func pull() -> AsyncThrowingStream<PullProgress, any Error>
     func evaluate(_ prompt: EvaluationPrompt) async throws -> Readings
+    /// Streams a Critique's text as the model writes it.
+    func critique(_ prompt: CritiquePrompt) -> AsyncThrowingStream<String, any Error>
 }
 
 public enum ModelStatus: Equatable, Sendable {

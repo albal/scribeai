@@ -92,6 +92,9 @@ final class FakeModelClient: ModelClient, Sendable {
         var holdsEvaluations = false
         var held: [CheckedContinuation<Void, any Error>] = []
         var cancellations = 0
+        var critiquePrompts: [CritiquePrompt] = []
+        var critiqueChunks: [String] = ["The register ", "is too casual."]
+        var critiqueFailure: (any Error)?
     }
 
     private let state = Mutex(State())
@@ -105,6 +108,35 @@ final class FakeModelClient: ModelClient, Sendable {
     var statusChecks: Int { state.withLock { $0.statusChecks } }
     var cancellations: Int { state.withLock { $0.cancellations } }
     var heldCount: Int { state.withLock { $0.held.count } }
+    var critiquePrompts: [CritiquePrompt] { state.withLock { $0.critiquePrompts } }
+
+    /// Sets the chunks every Critique streams, and optionally an error to end with.
+    func scriptCritique(_ chunks: [String], failure: (any Error)? = nil) {
+        state.withLock {
+            $0.critiqueChunks = chunks
+            $0.critiqueFailure = failure
+        }
+    }
+
+    func critique(_ prompt: CritiquePrompt) -> AsyncThrowingStream<String, any Error> {
+        let (chunks, failure, holds) = state.withLock { state in
+            state.critiquePrompts.append(prompt)
+            return (state.critiqueChunks, state.critiqueFailure, state.holdsEvaluations)
+        }
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    if holds { try await self.waitForRelease() }
+                    for chunk in chunks { continuation.yield(chunk) }
+                    if let failure { throw failure }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 
     /// While holding, Evaluations don't return until `release()` or cancellation.
     func hold() {
