@@ -1,0 +1,3 @@
+# Inference runs on Ollama, not Apple's Foundation Models
+
+Despite requiring macOS 26, which ships Apple's on-device Foundation Models framework, ScribeAI uses a local Ollama server for all Evaluations and Critiques. Foundation Models would remove the Ollama install and model download, but its ~3B model is weaker at nuanced literary judgment than the 7–12B models Ollama can run in 16GB, its ~4K-token context forces heavy chunking at Document Scope, it depends on Apple Intelligence being enabled, and its safety guardrails risk refusing to assess fiction with mature content. We chose judgment quality and freedom from guardrails over zero-install convenience.

@@ -1,0 +1,3 @@
+# v1 is built from source for developers, with no setup wizard
+
+The PRD promises "zero technical knowledge" setup: a first-launch wizard that silently installs Ollama. For v1 we instead target developers (and ourselves) who build the app from source in Xcode and install Ollama themselves; the app only detects a missing Ollama and explains how to install it, and pulls the configured model with a progress bar. This removes the hardest, riskiest part of the PRD (unattended binary installation) until the core critique loop is proven. Signed, notarized distribution and the wizard can be revisited when the audience widens to non-technical writers.
