@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 
 public enum EvaluationStatus: Equatable, Sendable {
@@ -10,6 +11,14 @@ public enum EvaluationStatus: Equatable, Sendable {
     case failed(EvaluationFailure)
 }
 
+/// How much text the writer wants evaluated. A Selection of two or more words overrides it.
+public enum Scope: String, CaseIterable, Identifiable, Sendable {
+    case sentence, paragraph, document
+
+    public var id: Self { self }
+    public var name: String { rawValue.capitalized }
+}
+
 /// The editor's view of ScribeCore: feed it text, cursor and Target; observe Readings.
 @MainActor @Observable
 public final class EditorSession {
@@ -17,20 +26,31 @@ public final class EditorSession {
 
     public private(set) var text: String
     public private(set) var cursor: Int
+    public private(set) var selection: Range<Int>
     public private(set) var readings: Readings?
     public private(set) var status: EvaluationStatus = .idle
     public var target: Target
+    public var scope: Scope = .paragraph {
+        didSet { refresh() }
+    }
+
+    /// The Scope actually being evaluated, nil when nothing under the cursor can be.
+    public private(set) var activeUnit: EvaluationUnit?
+
+    public var isSelectionActive: Bool {
+        if case .selection = activeUnit { true } else { false }
+    }
 
     public var wordCount: Int { MarkdownSegmenter.wordCount(of: text) }
 
     /// Replaceable, e.g. when the model setting changes.
     @ObservationIgnored public var model: any ModelClient
-    @ObservationIgnored private let clock: any Clock<Duration>
+    @ObservationIgnored private let startPause: PauseStarter
     @ObservationIgnored private var task: Task<Void, Never>?
 
     /// Identifies an Evaluation: the same text against the same Target always gets the same Readings.
     private struct EvaluationKey: Hashable {
-        let text: String
+        let unit: EvaluationUnit
         let target: Target
     }
 
@@ -40,30 +60,52 @@ public final class EditorSession {
     /// What is waiting for a pause or being evaluated.
     @ObservationIgnored private var pendingKey: EvaluationKey?
 
-    public init(
+    public convenience init(
+        text: String = "",
+        cursor: Int = 0,
+        target: Target = BuiltInTargets.default,
+        model: any ModelClient
+    ) {
+        self.init(text: text, cursor: cursor, target: target, model: model, clock: ContinuousClock())
+    }
+
+    public init<C: Clock<Duration>>(
         text: String = "",
         cursor: Int = 0,
         target: Target = BuiltInTargets.default,
         model: any ModelClient,
-        clock: any Clock<Duration> = ContinuousClock()
+        clock: C
     ) {
         self.text = text
         self.cursor = cursor
+        self.selection = cursor..<cursor
         self.target = target
         self.model = model
-        self.clock = clock
+        self.startPause = pauseStarter(on: clock)
     }
 
     /// The writer edited the text.
-    public func textDidChange(_ text: String, cursor: Int) {
+    public func textDidChange(_ text: String, selection: Range<Int>) {
         self.text = text
-        self.cursor = cursor
-        refresh()
+        select(selection)
     }
 
-    /// The Gauges follow the cursor to whatever text it's in.
+    public func textDidChange(_ text: String, cursor: Int) {
+        textDidChange(text, selection: cursor..<cursor)
+    }
+
+    /// The Gauges follow the cursor and Selection to whatever text they're in.
+    public func selectionDidChange(_ selection: Range<Int>) {
+        select(selection)
+    }
+
     public func cursorDidMove(to cursor: Int) {
-        self.cursor = cursor
+        select(cursor..<cursor)
+    }
+
+    private func select(_ selection: Range<Int>) {
+        self.selection = selection
+        cursor = selection.lowerBound
         refresh()
     }
 
@@ -74,16 +116,41 @@ public final class EditorSession {
         refresh()
     }
 
-    private var currentKey: EvaluationKey? {
-        MarkdownSegmenter.paragraph(at: cursor, in: text).map { EvaluationKey(text: $0.text, target: target) }
+    private var currentUnit: EvaluationUnit? {
+        if !selection.isEmpty {
+            let ns = text as NSString
+            let clamped = selection.clamped(to: 0..<ns.length)
+            let selected = ns.substring(with: NSRange(location: clamped.lowerBound, length: clamped.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if MarkdownSegmenter.wordCount(of: selected) >= 2 { return .selection(selected) }
+        }
+        switch scope {
+        case .paragraph:
+            guard let paragraph = MarkdownSegmenter.paragraph(at: cursor, in: text),
+                  MarkdownSegmenter.wordCount(of: paragraph.text) >= MarkdownSegmenter.minimumParagraphWords
+            else { return nil }
+            return .paragraph(paragraph.text)
+        case .sentence:
+            guard let (sentence, paragraph) = MarkdownSegmenter.sentence(at: cursor, in: text),
+                  MarkdownSegmenter.wordCount(of: sentence.text) >= MarkdownSegmenter.minimumSentenceWords
+            else { return nil }
+            return .sentence(sentence.text, paragraph: paragraph.text)
+        case .document:
+            return nil
+        }
     }
 
     private func refresh() {
-        guard let key = currentKey else {
+        activeUnit = currentUnit
+        guard let unit = activeUnit else {
+            // Too little text, or not prose: the Gauges show an empty state, not old Readings.
             cancelPending()
+            readings = nil
+            shownKey = nil
             status = .idle
             return
         }
+        let key = EvaluationKey(unit: unit, target: target)
         if key == shownKey, status == .idle { return }
         if let cached = cache[key] {
             cancelPending()
@@ -98,7 +165,7 @@ public final class EditorSession {
         task?.cancel()
         pendingKey = key
         status = .pending
-        let sleep = pause(on: clock, for: Self.pauseInterval)
+        let sleep = startPause(Self.pauseInterval)
         task = Task {
             do {
                 try await sleep()
@@ -123,7 +190,7 @@ public final class EditorSession {
 
     private func evaluate(_ key: EvaluationKey) async {
         status = .evaluating
-        let prompt = PromptBuilder.evaluation(of: key.text, target: key.target)
+        let prompt = PromptBuilder.evaluation(of: key.unit, target: key.target)
         do {
             let result = try await model.evaluate(prompt)
             guard !Task.isCancelled else { return }

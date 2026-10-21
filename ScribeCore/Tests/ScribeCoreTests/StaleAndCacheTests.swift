@@ -8,9 +8,9 @@ struct StaleAndCacheTests {
     let model = FakeModelClient()
 
     static let text = """
-        The first paragraph sits here, quiet and unassuming.
+        The first paragraph sits here, quiet and unassuming, waiting for a reader who may never come along.
 
-        The second paragraph is where the cursor rests.
+        The second paragraph is where the cursor rests, blinking patiently at the end of a long line.
         """
     static let firstParagraph = 10
     static let secondParagraph = (text as NSString).length - 5
@@ -30,12 +30,12 @@ struct StaleAndCacheTests {
         let session = makeSession()
         model.hold()
         model.enqueue(.success(try Readings(alignmentScore: 10, concision: 10, intensity: 10, tone: .urgent)))
-        session.textDidChange("A first draft of the line.", cursor: 0)
+        session.textDidChange(long("A first draft of the line."), cursor: 0)
         await clock.advance(by: EditorSession.pauseInterval)
         #expect(await waitUntil { model.heldCount == 1 })
         #expect(session.status == .evaluating)
 
-        session.textDidChange("A second draft of the line.", cursor: 0)
+        session.textDidChange(long("A second draft of the line."), cursor: 0)
         #expect(await waitUntil { model.cancellations == 1 })
         #expect(session.status == .pending)
         #expect(session.readings == nil)
@@ -48,16 +48,16 @@ struct StaleAndCacheTests {
 
     @Test func previousReadingsStayVisibleButStaleUntilTheNextEvaluation() async {
         let session = makeSession()
-        await evaluate(session, "A first draft of the line.", cursor: 0)
+        await evaluate(session, long("A first draft of the line."), cursor: 0)
         #expect(session.readings == .sample)
 
         model.hold()
-        session.textDidChange("A changed draft of the line.", cursor: 0)
+        session.textDidChange(long("A changed draft of the line."), cursor: 0)
         #expect(session.status == .pending)
         #expect(session.readings == .sample)
 
         await clock.advance(by: EditorSession.pauseInterval)
-        #expect(await waitUntil { session.status == .evaluating })
+        #expect(await waitUntil { session.status == .evaluating && model.heldCount == 1 })
         #expect(session.readings == .sample)
         model.release()
         #expect(await waitUntil { session.status == .idle })
@@ -105,18 +105,18 @@ struct StaleAndCacheTests {
 
     @Test func undoingBackToEvaluatedTextShowsItsReadingsImmediately() async {
         let session = makeSession()
-        await evaluate(session, "A first draft of the line.", cursor: 0)
-        session.textDidChange("A first draft of the line!", cursor: 0)
+        await evaluate(session, long("A first draft of the line."), cursor: 0)
+        session.textDidChange(long("A first draft of the line!"), cursor: 0)
         #expect(session.status == .pending)
 
-        session.textDidChange("A first draft of the line.", cursor: 0)
+        session.textDidChange(long("A first draft of the line."), cursor: 0)
         #expect(session.status == .idle)
         #expect(model.prompts.count == 1)
     }
 
     @Test func theCacheIsKeyedByTarget() async {
         let session = makeSession()
-        await evaluate(session, "A first draft of the line.", cursor: 0)
+        await evaluate(session, long("A first draft of the line."), cursor: 0)
 
         session.target = Target(id: "custom.test", name: "Test", kind: .custom, styleBrief: "Short and plain.")
         session.scheduleEvaluation()
@@ -127,7 +127,7 @@ struct StaleAndCacheTests {
 
     @Test func aSelectionChangeNotificationAfterAKeystrokeDoesNotRestartThePause() async {
         let session = makeSession()
-        session.textDidChange("Typing a line", cursor: 13)
+        session.textDidChange(long("Typing a line"), cursor: 13)
         await clock.advance(by: .seconds(1.5))
         session.cursorDidMove(to: 13)
         await clock.advance(by: .seconds(0.5))

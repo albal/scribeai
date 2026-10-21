@@ -8,6 +8,20 @@ struct GaugePane: View {
     private var readings: Readings? { session.readings }
     private var isStale: Bool { session.status != .idle }
 
+    private var scopeCaption: String {
+        switch session.activeUnit {
+        case .selection: "Selection"
+        case .sentence: "Sentence"
+        case .paragraph: "Paragraph"
+        case nil:
+            switch session.scope {
+            case .sentence: "Place the cursor in a sentence of \(MarkdownSegmenter.minimumSentenceWords)+ words"
+            case .paragraph: "Place the cursor in a paragraph of \(MarkdownSegmenter.minimumParagraphWords)+ words"
+            case .document: "Document"
+            }
+        }
+    }
+
     private var failure: EvaluationFailure? {
         if case .failed(let failure) = session.status { failure } else { nil }
     }
@@ -47,8 +61,13 @@ struct GaugePane: View {
 
     private var header: some View {
         HStack {
-            Text(session.target.name)
-                .font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.target.name)
+                    .font(.headline)
+                Text(scopeCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             switch session.status {
             case .evaluating:

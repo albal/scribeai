@@ -12,9 +12,9 @@ struct EditorSessionTests {
     }
 
     static let twoParagraphs = """
-        The first paragraph sits here, quiet and unassuming.
+        The first paragraph sits here, quiet and unassuming, waiting for a reader who may never come along.
 
-        The second paragraph is where the cursor rests.
+        The second paragraph is where the cursor rests, blinking patiently at the end of a long line.
         """
 
     @Test func gaugesAreEmptyBeforeTheFirstEvaluation() {
@@ -25,7 +25,7 @@ struct EditorSessionTests {
 
     @Test func nothingIsEvaluatedBeforeTheWriterPausesForTwoSeconds() async {
         let session = makeSession()
-        session.textDidChange("Some words being typed.", cursor: 5)
+        session.textDidChange(long("Some words being typed."), cursor: 5)
         #expect(session.status == .pending)
 
         await clock.advance(by: .milliseconds(1999))
@@ -45,15 +45,15 @@ struct EditorSessionTests {
         #expect(session.status == .idle)
         #expect(model.prompts.count == 1)
         let prompt = model.prompts.first?.user ?? ""
-        #expect(prompt.contains("The second paragraph is where the cursor rests."))
+        #expect(prompt.contains("The second paragraph is where the cursor rests, blinking patiently at the end of a long line."))
         #expect(!prompt.contains("The first paragraph"))
     }
 
     @Test func eachKeystrokeRestartsThePause() async {
         let session = makeSession()
-        session.textDidChange("Typing", cursor: 6)
+        session.textDidChange(long("Typing"), cursor: 6)
         await clock.advance(by: .seconds(1.5))
-        session.textDidChange("Typing on", cursor: 9)
+        session.textDidChange(long("Typing on"), cursor: 9)
         await clock.advance(by: .seconds(1.5))
         #expect(model.prompts.isEmpty)
 
@@ -64,7 +64,7 @@ struct EditorSessionTests {
 
     @Test func theEvaluationIsMeasuredAgainstTheTargetsStyleBrief() async {
         let session = makeSession()
-        session.textDidChange("A sentence to judge.", cursor: 0)
+        session.textDidChange(long("A sentence to judge."), cursor: 0)
         await clock.advance(by: .seconds(2))
         #expect(await waitUntil { model.prompts.count == 1 })
 
@@ -76,7 +76,7 @@ struct EditorSessionTests {
     @Test func aFailedEvaluationIsReportedAndShowsNoReadings() async {
         model.enqueue(.failure(EvaluationFailure.invalidOutput))
         let session = makeSession()
-        session.textDidChange("A sentence to judge.", cursor: 0)
+        session.textDidChange(long("A sentence to judge."), cursor: 0)
         await clock.advance(by: .seconds(2))
 
         #expect(await waitUntil { if case .failed = session.status { true } else { false } })
@@ -86,11 +86,11 @@ struct EditorSessionTests {
     @Test func aFailedEvaluationIsRetriedOnTheNextPause() async {
         model.enqueue(.failure(EvaluationFailure.ollamaNotRunning))
         let session = makeSession()
-        session.textDidChange("A sentence to judge.", cursor: 0)
+        session.textDidChange(long("A sentence to judge."), cursor: 0)
         await clock.advance(by: .seconds(2))
         #expect(await waitUntil { session.status == .failed(.ollamaNotRunning) })
 
-        session.textDidChange("A sentence to judge again.", cursor: 0)
+        session.textDidChange(long("A sentence to judge again."), cursor: 0)
         await clock.advance(by: .seconds(2))
         #expect(await waitUntil { session.readings == .sample })
         #expect(session.status == .idle)
@@ -98,7 +98,7 @@ struct EditorSessionTests {
 
     @Test func aCursorOnABlankLineEvaluatesNothing() async {
         let session = makeSession()
-        session.textDidChange("Para one.\n\n\n\nPara two.", cursor: 10)
+        session.textDidChange(long("Para one.\n\n\n\nPara two."), cursor: 10)
         await clock.advance(by: .seconds(2))
         #expect(await waitUntil { session.status == .idle })
         #expect(model.prompts.isEmpty)

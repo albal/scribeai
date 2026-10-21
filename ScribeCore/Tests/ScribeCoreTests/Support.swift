@@ -193,3 +193,8 @@ final class FakeModelClient: ModelClient, Sendable {
 extension Readings {
     static let sample = try! Readings(alignmentScore: 78, concision: 60, intensity: 40, tone: .casual)
 }
+
+/// Pads `text` past the minimum Paragraph length so it can be evaluated.
+func long(_ text: String) -> String {
+    text + " And the words keep going on and on until there are more than enough of them."
+}

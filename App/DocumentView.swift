@@ -16,11 +16,11 @@ struct DocumentView: View {
             VStack(spacing: 0) {
                 MarkdownEditor(
                     text: document.text,
-                    onTextChange: { text, cursor in
+                    onTextChange: { text, selection in
                         document.text = text
-                        session.textDidChange(text, cursor: cursor)
+                        session.textDidChange(text, selection: selection)
                     },
-                    onCursorMove: { session.cursorDidMove(to: $0) }
+                    onSelectionChange: { session.selectionDidChange($0) }
                 )
                 Divider()
                 HStack {
@@ -43,6 +43,17 @@ struct DocumentView: View {
                 }
             }
             .frame(minWidth: 260, idealWidth: 300, maxWidth: 380)
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Scope", selection: $session.scope) {
+                    ForEach(Scope.allCases) { scope in
+                        Text(scope.name).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("How much text is evaluated. Selecting two or more words evaluates just the Selection.")
+            }
         }
         .onChange(of: environment.state, initial: true) { _, state in
             guard state == .ready else { return }

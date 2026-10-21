@@ -4,8 +4,8 @@ import SwiftUI
 /// A plain-text editor that reports edits and cursor moves in UTF-16 offsets.
 struct MarkdownEditor: NSViewRepresentable {
     var text: String
-    var onTextChange: (String, Int) -> Void
-    var onCursorMove: (Int) -> Void
+    var onTextChange: (String, Range<Int>) -> Void
+    var onSelectionChange: (Range<Int>) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -39,12 +39,12 @@ struct MarkdownEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            parent.onTextChange(textView.string, textView.selectedRange().location)
+            parent.onTextChange(textView.string, Range(textView.selectedRange()) ?? 0..<0)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            parent.onCursorMove(textView.selectedRange().location)
+            parent.onSelectionChange(Range(textView.selectedRange()) ?? 0..<0)
         }
     }
 }
