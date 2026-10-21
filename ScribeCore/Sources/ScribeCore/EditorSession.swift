@@ -29,9 +29,12 @@ public final class EditorSession {
     public private(set) var selection: Range<Int>
     public private(set) var readings: Readings?
     public private(set) var status: EvaluationStatus = .idle
-    public var target: Target
+    /// Changing the Target evaluates again.
+    public var target: Target {
+        didSet { if target != oldValue { refresh() } }
+    }
     public var scope: Scope = .paragraph {
-        didSet { refresh() }
+        didSet { if scope != oldValue { refresh() } }
     }
 
     /// The Scope actually being evaluated, nil when nothing under the cursor can be.
