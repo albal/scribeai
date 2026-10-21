@@ -44,7 +44,7 @@ struct EditorSessionTests {
         #expect(session.readings == .sample)
         #expect(session.status == .idle)
         #expect(model.prompts.count == 1)
-        let prompt = model.prompts[0].user
+        let prompt = model.prompts.first?.user ?? ""
         #expect(prompt.contains("The second paragraph is where the cursor rests."))
         #expect(!prompt.contains("The first paragraph"))
     }
@@ -59,7 +59,7 @@ struct EditorSessionTests {
 
         await clock.advance(by: .seconds(0.5))
         #expect(await waitUntil { model.prompts.count == 1 })
-        #expect(model.prompts[0].user.contains("Typing on"))
+        #expect(model.prompts.first?.user.contains("Typing on") == true)
     }
 
     @Test func theEvaluationIsMeasuredAgainstTheTargetsStyleBrief() async {
@@ -68,7 +68,7 @@ struct EditorSessionTests {
         await clock.advance(by: .seconds(2))
         #expect(await waitUntil { model.prompts.count == 1 })
 
-        let prompt = model.prompts[0].user
+        let prompt = model.prompts.first?.user ?? ""
         #expect(prompt.contains(BuiltInTargets.default.name))
         #expect(prompt.contains(BuiltInTargets.default.styleBrief))
     }

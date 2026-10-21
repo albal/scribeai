@@ -25,6 +25,7 @@ final class ManualClock: Clock, Sendable {
     private let state = Mutex(State())
 
     var now: Instant { state.withLock { $0.now } }
+    var sleeperCount: Int { state.withLock { $0.sleepers.count } }
     var minimumResolution: Duration { .zero }
 
     func sleep(until deadline: Instant, tolerance: Duration?) async throws {
@@ -88,6 +89,9 @@ final class FakeModelClient: ModelClient, Sendable {
         var statuses: [ModelStatus] = []
         var statusChecks = 0
         var pullEvents: [Result<PullProgress, any Error>] = []
+        var holdsEvaluations = false
+        var held: [CheckedContinuation<Void, any Error>] = []
+        var cancellations = 0
     }
 
     private let state = Mutex(State())
@@ -99,6 +103,23 @@ final class FakeModelClient: ModelClient, Sendable {
     }
 
     var statusChecks: Int { state.withLock { $0.statusChecks } }
+    var cancellations: Int { state.withLock { $0.cancellations } }
+    var heldCount: Int { state.withLock { $0.held.count } }
+
+    /// While holding, Evaluations don't return until `release()` or cancellation.
+    func hold() {
+        state.withLock { $0.holdsEvaluations = true }
+    }
+
+    /// Stops holding and lets every held Evaluation return.
+    func release() {
+        let held = state.withLock { state in
+            state.holdsEvaluations = false
+            defer { state.held = [] }
+            return state.held
+        }
+        held.forEach { $0.resume() }
+    }
 
     /// Queues status answers; once the queue is empty, `.ready` is returned.
     func enqueue(status: ModelStatus...) {
@@ -138,11 +159,34 @@ final class FakeModelClient: ModelClient, Sendable {
     }
 
     func evaluate(_ prompt: EvaluationPrompt) async throws -> Readings {
-        let next = state.withLock { state -> Result<Readings, any Error>? in
+        let (next, holds) = state.withLock { state -> (Result<Readings, any Error>?, Bool) in
             state.prompts.append(prompt)
-            return state.responses.isEmpty ? nil : state.responses.removeFirst()
+            return (state.responses.isEmpty ? nil : state.responses.removeFirst(), state.holdsEvaluations)
         }
+        if holds { try await waitForRelease() }
         return try (next ?? .success(defaultReadings)).get()
+    }
+
+    private func waitForRelease() async throws {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                state.withLock { state in
+                    if Task.isCancelled {
+                        state.cancellations += 1
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        state.held.append(continuation)
+                    }
+                }
+            }
+        } onCancel: {
+            let held = state.withLock { state in
+                defer { state.held = [] }
+                state.cancellations += state.held.count
+                return state.held
+            }
+            held.forEach { $0.resume(throwing: CancellationError()) }
+        }
     }
 }
 

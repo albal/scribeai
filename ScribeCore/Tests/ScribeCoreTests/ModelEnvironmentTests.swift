@@ -20,10 +20,10 @@ struct ModelEnvironmentTests {
         model.enqueue(status: .ollamaNotRunning, .ollamaNotRunning)
         let environment = makeEnvironment()
         environment.check()
-        #expect(await waitUntil { environment.state == .ollamaNotRunning })
+        #expect(await waitUntil { environment.state == .ollamaNotRunning && clock.sleeperCount == 1 })
 
         await clock.advance(by: ModelEnvironment.pollInterval)
-        #expect(await waitUntil { model.statusChecks == 2 })
+        #expect(await waitUntil { model.statusChecks == 2 && clock.sleeperCount == 1 })
         #expect(environment.state == .ollamaNotRunning)
 
         await clock.advance(by: ModelEnvironment.pollInterval)

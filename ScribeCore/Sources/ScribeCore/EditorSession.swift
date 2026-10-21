@@ -1,11 +1,11 @@
 import Observation
 
 public enum EvaluationStatus: Equatable, Sendable {
-    /// Readings (if any) describe the current text.
+    /// Readings (if any) describe the text under the cursor.
     case idle
-    /// Waiting for the writer to pause.
+    /// Waiting for the writer to pause; any Readings shown are stale.
     case pending
-    /// An Evaluation is running.
+    /// An Evaluation is running; any Readings shown are stale.
     case evaluating
     case failed(EvaluationFailure)
 }
@@ -28,6 +28,18 @@ public final class EditorSession {
     @ObservationIgnored private let clock: any Clock<Duration>
     @ObservationIgnored private var task: Task<Void, Never>?
 
+    /// Identifies an Evaluation: the same text against the same Target always gets the same Readings.
+    private struct EvaluationKey: Hashable {
+        let text: String
+        let target: Target
+    }
+
+    @ObservationIgnored private var cache: [EvaluationKey: Readings] = [:]
+    /// What the shown Readings describe.
+    @ObservationIgnored private var shownKey: EvaluationKey?
+    /// What is waiting for a pause or being evaluated.
+    @ObservationIgnored private var pendingKey: EvaluationKey?
+
     public init(
         text: String = "",
         cursor: Int = 0,
@@ -42,45 +54,85 @@ public final class EditorSession {
         self.clock = clock
     }
 
-    /// The writer edited the text. Schedules an Evaluation for when they pause.
+    /// The writer edited the text.
     public func textDidChange(_ text: String, cursor: Int) {
         self.text = text
         self.cursor = cursor
-        scheduleEvaluation()
+        refresh()
     }
 
+    /// The Gauges follow the cursor to whatever text it's in.
     public func cursorDidMove(to cursor: Int) {
         self.cursor = cursor
+        refresh()
     }
 
-    /// Evaluate what's under the cursor after a pause, e.g. when a Document is opened.
+    /// Evaluate what's under the cursor, e.g. when a Document is opened or the model changes.
     public func scheduleEvaluation() {
-        task?.cancel()
-        status = .pending
-        task = Task { [clock] in
-            do {
-                try await clock.sleep(for: Self.pauseInterval)
-            } catch {
-                return
-            }
-            await self.evaluateCurrentScope()
-        }
+        pendingKey = nil
+        shownKey = nil
+        refresh()
     }
 
-    private func evaluateCurrentScope() async {
-        guard let paragraph = MarkdownSegmenter.paragraph(at: cursor, in: text) else {
+    private var currentKey: EvaluationKey? {
+        MarkdownSegmenter.paragraph(at: cursor, in: text).map { EvaluationKey(text: $0.text, target: target) }
+    }
+
+    private func refresh() {
+        guard let key = currentKey else {
+            cancelPending()
             status = .idle
             return
         }
+        if key == shownKey, status == .idle { return }
+        if let cached = cache[key] {
+            cancelPending()
+            show(cached, for: key)
+            return
+        }
+        if key == pendingKey { return }
+        schedule(key)
+    }
+
+    private func schedule(_ key: EvaluationKey) {
+        task?.cancel()
+        pendingKey = key
+        status = .pending
+        let sleep = pause(on: clock, for: Self.pauseInterval)
+        task = Task {
+            do {
+                try await sleep()
+            } catch {
+                return
+            }
+            await self.evaluate(key)
+        }
+    }
+
+    private func cancelPending() {
+        task?.cancel()
+        task = nil
+        pendingKey = nil
+    }
+
+    private func show(_ readings: Readings, for key: EvaluationKey) {
+        self.readings = readings
+        shownKey = key
+        status = .idle
+    }
+
+    private func evaluate(_ key: EvaluationKey) async {
         status = .evaluating
-        let prompt = PromptBuilder.evaluation(of: paragraph.text, target: target)
+        let prompt = PromptBuilder.evaluation(of: key.text, target: key.target)
         do {
             let result = try await model.evaluate(prompt)
             guard !Task.isCancelled else { return }
-            readings = result
-            status = .idle
+            cache[key] = result
+            pendingKey = nil
+            show(result, for: key)
         } catch {
             guard !Task.isCancelled, !(error is CancellationError) else { return }
+            pendingKey = nil
             status = .failed(error as? EvaluationFailure ?? .other(String(describing: error)))
         }
     }
