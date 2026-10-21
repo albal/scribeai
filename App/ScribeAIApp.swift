@@ -63,7 +63,7 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
             TextField("Ollama model", text: $draft, prompt: Text(OllamaClient.defaultModel))
                 .onSubmit(commit)
-            Text("Any model name from ollama.com/library, e.g. llama3.1:8b. Press Return to apply.")
+            Text("Any model name from ollama.com/library, e.g. gemma3:12b. Press Return to apply.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

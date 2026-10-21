@@ -3,7 +3,7 @@ import Foundation
 /// Talks to a local Ollama server.
 public struct OllamaClient: ModelClient {
     public static let defaultBaseURL = URL(string: "http://localhost:11434")!
-    public static let defaultModel = "llama3.1:8b"
+    public static let defaultModel = "gemma3:12b"
 
     /// Large enough for a Document Scope chunk plus its prompt.
     static let contextWindow = 8192

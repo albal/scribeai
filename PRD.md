@@ -34,7 +34,7 @@ ScribeAI critiques; it never writes. Critiques diagnose problems in the writer's
 * **Ollama is a prerequisite.** The user installs it themselves (`brew install ollama` or ollama.com).
 * **Launch check:** On launch the app checks for Ollama on `http://localhost:11434`. If Ollama isn't reachable, the app shows a "not running" screen with install instructions.
 * **Model download:** If Ollama is running but the configured model is missing, the app downloads it via `/api/pull` and shows a progress bar.
-* **Model setting:** The model name is a user setting. The default is chosen through prompt testing (see §9). Candidates include `llama3.1:8b`, `qwen3:8b` and `gemma3:12b`, all of which fit in 16GB.
+* **Model setting:** The model name is a user setting. The default is `gemma3:12b`, which fits in 16GB. Other candidates compared with the prompt-testing harness (see §9) include `llama3.1:8b` and `qwen3:8b`.
 * **Out of scope for v1:** A first-launch wizard and silent installation of the Ollama binary.
 
 ### 4.2 Split-Pane User Interface
