@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DocumentView: View {
     @Binding var document: ScribeDocument
+    @Environment(ModelEnvironment.self) private var environment
     @State private var session: EditorSession
 
     init(document: Binding<ScribeDocument>) {
@@ -34,9 +35,24 @@ struct DocumentView: View {
             }
             .frame(minWidth: 420)
 
-            GaugePane(session: session)
-                .frame(minWidth: 260, idealWidth: 300, maxWidth: 380)
+            Group {
+                if environment.state == .ready {
+                    GaugePane(session: session)
+                } else {
+                    EnvironmentStatusView(environment: environment)
+                }
+            }
+            .frame(minWidth: 260, idealWidth: 300, maxWidth: 380)
         }
-        .onAppear { session.scheduleEvaluation() }
+        .onChange(of: environment.state, initial: true) { _, state in
+            guard state == .ready else { return }
+            session.model = environment.client
+            session.scheduleEvaluation()
+        }
+        .onChange(of: session.status) { _, status in
+            if case .failed(let failure) = status {
+                environment.evaluationFailed(failure)
+            }
+        }
     }
 }

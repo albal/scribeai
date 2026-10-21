@@ -85,13 +85,49 @@ final class FakeModelClient: ModelClient, Sendable {
     private struct State {
         var prompts: [EvaluationPrompt] = []
         var responses: [Result<Readings, any Error>] = []
+        var statuses: [ModelStatus] = []
+        var statusChecks = 0
+        var pullEvents: [Result<PullProgress, any Error>] = []
     }
 
     private let state = Mutex(State())
     let defaultReadings: Readings
+    let model = "fake-model"
 
     init(readings: Readings = .sample) {
         defaultReadings = readings
+    }
+
+    var statusChecks: Int { state.withLock { $0.statusChecks } }
+
+    /// Queues status answers; once the queue is empty, `.ready` is returned.
+    func enqueue(status: ModelStatus...) {
+        state.withLock { $0.statuses.append(contentsOf: status) }
+    }
+
+    /// Sets what the next `pull()` will emit, in order.
+    func scriptPull(_ events: [Result<PullProgress, any Error>]) {
+        state.withLock { $0.pullEvents = events }
+    }
+
+    func status() async -> ModelStatus {
+        state.withLock { state in
+            state.statusChecks += 1
+            return state.statuses.isEmpty ? .ready : state.statuses.removeFirst()
+        }
+    }
+
+    func pull() -> AsyncThrowingStream<PullProgress, any Error> {
+        let events = state.withLock { $0.pullEvents }
+        return AsyncThrowingStream { continuation in
+            for event in events {
+                switch event {
+                case .success(let progress): continuation.yield(progress)
+                case .failure(let error): continuation.finish(throwing: error); return
+                }
+            }
+            continuation.finish()
+        }
     }
 
     var prompts: [EvaluationPrompt] { state.withLock { $0.prompts } }

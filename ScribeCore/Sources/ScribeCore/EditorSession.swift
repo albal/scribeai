@@ -7,7 +7,7 @@ public enum EvaluationStatus: Equatable, Sendable {
     case pending
     /// An Evaluation is running.
     case evaluating
-    case failed(String)
+    case failed(EvaluationFailure)
 }
 
 /// The editor's view of ScribeCore: feed it text, cursor and Target; observe Readings.
@@ -23,7 +23,8 @@ public final class EditorSession {
 
     public var wordCount: Int { MarkdownSegmenter.wordCount(of: text) }
 
-    @ObservationIgnored private let model: any ModelClient
+    /// Replaceable, e.g. when the model setting changes.
+    @ObservationIgnored public var model: any ModelClient
     @ObservationIgnored private let clock: any Clock<Duration>
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -79,8 +80,8 @@ public final class EditorSession {
             readings = result
             status = .idle
         } catch {
-            guard !Task.isCancelled else { return }
-            status = .failed(String(describing: error))
+            guard !Task.isCancelled, !(error is CancellationError) else { return }
+            status = .failed(error as? EvaluationFailure ?? .other(String(describing: error)))
         }
     }
 }

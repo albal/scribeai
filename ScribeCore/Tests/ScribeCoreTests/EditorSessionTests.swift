@@ -74,13 +74,26 @@ struct EditorSessionTests {
     }
 
     @Test func aFailedEvaluationIsReportedAndShowsNoReadings() async {
-        model.enqueue(.failure(OllamaError.invalidOutput))
+        model.enqueue(.failure(EvaluationFailure.invalidOutput))
         let session = makeSession()
         session.textDidChange("A sentence to judge.", cursor: 0)
         await clock.advance(by: .seconds(2))
 
         #expect(await waitUntil { if case .failed = session.status { true } else { false } })
         #expect(session.readings == nil)
+    }
+
+    @Test func aFailedEvaluationIsRetriedOnTheNextPause() async {
+        model.enqueue(.failure(EvaluationFailure.ollamaNotRunning))
+        let session = makeSession()
+        session.textDidChange("A sentence to judge.", cursor: 0)
+        await clock.advance(by: .seconds(2))
+        #expect(await waitUntil { session.status == .failed(.ollamaNotRunning) })
+
+        session.textDidChange("A sentence to judge again.", cursor: 0)
+        await clock.advance(by: .seconds(2))
+        #expect(await waitUntil { session.readings == .sample })
+        #expect(session.status == .idle)
     }
 
     @Test func aCursorOnABlankLineEvaluatesNothing() async {

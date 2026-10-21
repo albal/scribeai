@@ -6,11 +6,30 @@ struct GaugePane: View {
     let session: EditorSession
 
     private var readings: Readings? { session.readings }
-    private var isStale: Bool { session.status == .pending || session.status == .evaluating }
+    private var isStale: Bool { session.status != .idle }
+
+    private var failure: EvaluationFailure? {
+        if case .failed(let failure) = session.status { failure } else { nil }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
+            if let failure {
+                Label(failure.message, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
+            gauges
+            Spacer()
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.background.secondary)
+    }
+
+    private var gauges: some View {
+        VStack(alignment: .leading, spacing: 16) {
             AlignmentGauge(readings: readings)
             ScaleGauge(
                 title: "Concision", symbol: "✂️", value: readings?.concision,
@@ -21,13 +40,9 @@ struct GaugePane: View {
                 lowLabel: "Restrained", highLabel: "Purple", judging: false
             )
             ToneGauge(tone: readings?.tone)
-            Spacer()
         }
-        .padding(20)
         .opacity(isStale && readings != nil ? 0.45 : 1)
         .animation(.easeInOut(duration: 0.2), value: isStale)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.background.secondary)
     }
 
     private var header: some View {
@@ -38,11 +53,7 @@ struct GaugePane: View {
             switch session.status {
             case .evaluating:
                 ProgressView().controlSize(.small)
-            case .failed(let message):
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-                    .help(message)
-            case .idle, .pending:
+            case .idle, .pending, .failed:
                 EmptyView()
             }
         }
