@@ -13,6 +13,7 @@ struct GaugePane: View {
         case .selection: "Selection"
         case .sentence: "Sentence"
         case .paragraph: "Paragraph"
+        case .chunk: "Document"
         case nil:
             switch session.scope {
             case .sentence: "Place the cursor in a sentence of \(MarkdownSegmenter.minimumSentenceWords)+ words"
@@ -21,6 +22,9 @@ struct GaugePane: View {
             }
         }
     }
+
+    /// Whole-Document Readings are shown, rather than those for the text under the cursor.
+    private var showsDocument: Bool { session.scope == .document && session.activeUnit == nil }
 
     private var failure: EvaluationFailure? {
         if case .failed(let failure) = session.status { failure } else { nil }
@@ -33,6 +37,9 @@ struct GaugePane: View {
                 Label(failure.message, systemImage: "exclamationmark.triangle")
                     .font(.callout)
                     .foregroundStyle(.orange)
+            }
+            if showsDocument {
+                DocumentControls(session: session)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -66,7 +73,7 @@ struct GaugePane: View {
             }
             critiqueButton(.tone) { ToneGauge(tone: readings?.tone) }
         }
-        .opacity(isStale && readings != nil ? 0.45 : 1)
+        .opacity((isStale || showsDocument && session.isDocumentEvaluationOutOfDate) && readings != nil ? 0.45 : 1)
         .animation(.easeInOut(duration: 0.2), value: isStale)
     }
 
@@ -84,8 +91,8 @@ struct GaugePane: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .disabled(readings == nil)
-        .help(readings == nil ? "" : "Explain this \(gauge.name) Reading")
+        .disabled(readings == nil || showsDocument)
+        .help(readings == nil || showsDocument ? "" : "Explain this \(gauge.name) Reading")
     }
 
     private var header: some View {
@@ -259,5 +266,43 @@ private struct CritiquePanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.background, in: .rect(cornerRadius: 10))
         .opacity(critique.isOutOfDate ? 0.6 : 1)
+    }
+}
+
+/// Evaluate the whole Document on request, with progress and cancel.
+private struct DocumentControls: View {
+    let session: EditorSession
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let evaluation = session.documentEvaluation, evaluation.isRunning {
+                ProgressView(value: Double(evaluation.completedChunks), total: Double(max(evaluation.totalChunks, 1))) {
+                    Text("Evaluating section \(min(evaluation.completedChunks + 1, evaluation.totalChunks)) of \(evaluation.totalChunks)")
+                        .font(.caption)
+                }
+                Button("Cancel", role: .cancel, action: session.cancelDocumentEvaluation)
+            } else {
+                HStack {
+                    Button(session.documentEvaluation?.readings == nil ? "Evaluate Document" : "Evaluate Again") {
+                        session.evaluateDocument()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(session.wordCount == 0)
+                    if session.isDocumentEvaluationOutOfDate {
+                        Text("Out of date")
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.yellow.opacity(0.25), in: .capsule)
+                            .help("The Document or its Target has changed since it was evaluated")
+                    }
+                }
+                if let failure = session.documentEvaluation?.failure {
+                    Label(failure.message, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
     }
 }

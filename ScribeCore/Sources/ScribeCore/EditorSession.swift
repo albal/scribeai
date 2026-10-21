@@ -53,6 +53,14 @@ public final class EditorSession {
     }
 
     public private(set) var critique: Critique?
+    /// The last on-request Evaluation of the whole Document, if any.
+    public private(set) var documentEvaluation: DocumentEvaluation?
+
+    /// The Document's text or Target has changed since its Evaluation.
+    public var isDocumentEvaluationOutOfDate: Bool {
+        guard let documentEvaluation else { return false }
+        return documentEvaluation.evaluatedText != text || documentEvaluation.evaluatedTarget != target
+    }
 
     /// The Scope actually being evaluated, nil when nothing under the cursor can be.
     public private(set) var activeUnit: EvaluationUnit?
@@ -69,6 +77,9 @@ public final class EditorSession {
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var critiqueTask: Task<Void, Never>?
     @ObservationIgnored private var critiqueID = 0
+    @ObservationIgnored private var documentTask: Task<Void, Never>?
+    /// Restored if a Document Evaluation is cancelled.
+    @ObservationIgnored private var previousDocumentEvaluation: DocumentEvaluation?
 
     /// Identifies an Evaluation: the same text against the same Target always gets the same Readings.
     private struct EvaluationKey: Hashable {
@@ -189,6 +200,54 @@ public final class EditorSession {
         return MarkdownSegmenter.paragraphs(in: text).contains { $0.text.contains(unit.text) }
     }
 
+    // MARK: Document Scope
+
+    /// Evaluates the whole Document, chunk by chunk. Document Scope never runs automatically.
+    public func evaluateDocument() {
+        documentTask?.cancel()
+        let chunks = DocumentChunker.chunks(of: text)
+        if documentEvaluation?.readings != nil { previousDocumentEvaluation = documentEvaluation }
+        let previous = previousDocumentEvaluation
+        documentEvaluation = DocumentEvaluation(totalChunks: chunks.count, evaluatedText: text, evaluatedTarget: target)
+        let target = target
+        documentTask = Task {
+            while let critiqueTask = self.critiqueTask {
+                await critiqueTask.value
+            }
+            var parts: [(readings: Readings, words: Int)] = []
+            for chunk in chunks {
+                do {
+                    let readings = try await self.model.evaluate(PromptBuilder.evaluation(of: .chunk(chunk), target: target))
+                    guard !Task.isCancelled else { return }
+                    parts.append((readings, MarkdownSegmenter.wordCount(of: chunk)))
+                    self.documentEvaluation?.completedChunks += 1
+                } catch {
+                    guard !Task.isCancelled, !(error is CancellationError) else { return }
+                    self.documentEvaluation?.failure = error as? EvaluationFailure ?? .other(String(describing: error))
+                    self.documentTask = nil
+                    return
+                }
+            }
+            if let combined = DocumentChunker.combine(parts) {
+                self.documentEvaluation?.readings = combined
+            } else {
+                self.documentEvaluation = previous
+            }
+            self.documentTask = nil
+            self.refresh()
+        }
+        refresh()
+    }
+
+    /// Stops a Document Evaluation; its remaining chunks are not evaluated.
+    public func cancelDocumentEvaluation() {
+        guard let documentTask else { return }
+        documentTask.cancel()
+        self.documentTask = nil
+        documentEvaluation = previousDocumentEvaluation
+        refresh()
+    }
+
     // MARK: Evaluation
 
     private var currentUnit: EvaluationUnit? {
@@ -217,6 +276,14 @@ public final class EditorSession {
 
     private func refresh() {
         activeUnit = currentUnit
+        if scope == .document, activeUnit == nil {
+            // Document Scope shows the Document's Readings, and only evaluates on request.
+            cancelPending()
+            shownKey = nil
+            readings = documentEvaluation?.readings
+            status = documentTask != nil ? .evaluating : .idle
+            return
+        }
         guard let unit = activeUnit else {
             // Too little text, or not prose: the Gauges show an empty state, not old Readings.
             cancelPending()
@@ -264,9 +331,9 @@ public final class EditorSession {
     }
 
     private func evaluate(_ key: EvaluationKey) async {
-        // One model request at a time: wait for a Critique to finish.
-        while let critiqueTask {
-            await critiqueTask.value
+        // One model request at a time: wait for a Critique or Document Evaluation to finish.
+        while let running = critiqueTask ?? documentTask {
+            await running.value
             guard !Task.isCancelled else { return }
         }
         status = .evaluating

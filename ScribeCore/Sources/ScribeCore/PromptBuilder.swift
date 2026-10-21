@@ -4,10 +4,21 @@ public enum EvaluationUnit: Hashable, Sendable {
     case sentence(String, paragraph: String)
     case paragraph(String)
     case selection(String)
+    /// One chunk of a Document Scope Evaluation.
+    case chunk(String)
 
     public var text: String {
         switch self {
-        case .sentence(let text, _), .paragraph(let text), .selection(let text): text
+        case .sentence(let text, _), .paragraph(let text), .selection(let text), .chunk(let text): text
+        }
+    }
+
+    var noun: String {
+        switch self {
+        case .sentence: "sentence"
+        case .paragraph: "paragraph"
+        case .selection: "passage"
+        case .chunk: "section"
         }
     }
 }
@@ -32,18 +43,21 @@ public enum PromptBuilder {
 
     public static func evaluation(of unit: EvaluationUnit, target: Target) -> EvaluationPrompt {
         let tones = Tone.allCases.map(\.rawValue).joined(separator: ", ")
-        let (noun, context): (String, String) = switch unit {
+        let noun = unit.noun
+        let context = switch unit {
         case .sentence(_, let paragraph):
-            ("sentence", """
+            """
 
                 The sentence comes from this paragraph, given for context only. Score the sentence, not the paragraph:
                 \"\"\"
                 \(paragraph)
                 \"\"\"
 
-                """)
-        case .paragraph: ("paragraph", "")
-        case .selection: ("passage", "")
+                """
+        case .chunk:
+            "\nThe section is part of a longer document; judge it on its own terms.\n"
+        case .paragraph, .selection:
+            ""
         }
         let user = """
             Target: \(target.name)
@@ -83,11 +97,7 @@ public enum PromptBuilder {
     ]
 
     public static func critique(of gauge: Gauge, readings: Readings, unit: EvaluationUnit, target: Target) -> CritiquePrompt {
-        let noun = switch unit {
-        case .sentence: "sentence"
-        case .paragraph: "paragraph"
-        case .selection: "passage"
-        }
+        let noun = unit.noun
         let user = """
             Target: \(target.name)
             Style Brief:

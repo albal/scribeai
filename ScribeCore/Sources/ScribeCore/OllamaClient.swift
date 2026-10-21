@@ -5,6 +5,9 @@ public struct OllamaClient: ModelClient {
     public static let defaultBaseURL = URL(string: "http://localhost:11434")!
     public static let defaultModel = "llama3.1:8b"
 
+    /// Large enough for a Document Scope chunk plus its prompt.
+    static let contextWindow = 8192
+
     public let baseURL: URL
     public let model: String
     let session: URLSession
@@ -114,7 +117,7 @@ public struct OllamaClient: ModelClient {
             "model": model,
             "stream": false,
             "format": Self.readingsSchema,
-            "options": ["temperature": 0.2],
+            "options": ["temperature": 0.2, "num_ctx": Self.contextWindow],
             "messages": [
                 ["role": "system", "content": prompt.system],
                 ["role": "user", "content": prompt.user],
@@ -170,7 +173,7 @@ public struct OllamaClient: ModelClient {
                     let body: [String: Any] = [
                         "model": model,
                         "stream": true,
-                        "options": ["temperature": 0.4],
+                        "options": ["temperature": 0.4, "num_ctx": Self.contextWindow],
                         "messages": [
                             ["role": "system", "content": prompt.system],
                             ["role": "user", "content": prompt.user],
