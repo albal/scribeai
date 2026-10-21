@@ -6,6 +6,7 @@ struct TargetMenu: View {
     let catalog: TargetCatalog
     let selection: Target
     let choose: (Target) -> Void
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Menu {
@@ -14,6 +15,8 @@ struct TargetMenu: View {
             if !catalog.custom.isEmpty {
                 section("Custom", catalog.custom)
             }
+            Divider()
+            Button("Manage Custom Targets…") { openWindow(id: CustomTargetsWindow.id) }
         } label: {
             Label(selection.name, systemImage: "target")
                 .labelStyle(.titleAndIcon)
@@ -36,6 +39,8 @@ struct TargetMenu: View {
 /// Shows the Style Brief a Target judges against.
 struct StyleBriefView: View {
     let target: Target
+    /// Copies a Built-in Target into a Custom Target and switches to it.
+    let duplicate: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -47,9 +52,13 @@ struct StyleBriefView: View {
                     .foregroundStyle(.secondary)
             }
             Text("Style Brief").font(.subheadline.weight(.semibold))
-            Text(target.styleBrief)
+            Text(target.styleBrief.isEmpty ? "No Style Brief yet." : target.styleBrief)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+            if target.isBuiltIn {
+                Button("Duplicate as Custom", action: duplicate)
+                    .help("Copy this Style Brief into a Custom Target you can edit")
+            }
         }
         .padding(16)
         .frame(width: 360)

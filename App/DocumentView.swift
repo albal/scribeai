@@ -4,24 +4,15 @@ import SwiftUI
 struct DocumentView: View {
     @Binding var document: ScribeDocument
     @Environment(ModelEnvironment.self) private var environment
+    @Environment(CustomTargets.self) private var customTargets
+    @Environment(\.openWindow) private var openWindow
     @State private var session: EditorSession
     @State private var unknownTargetID: String?
     @State private var showsStyleBrief = false
 
-    private let catalog = TargetCatalog()
-
     init(document: Binding<ScribeDocument>) {
         _document = document
-        let resolution = TargetCatalog().resolve(
-            storedID: document.wrappedValue.file.targetID,
-            defaultID: UserDefaults.standard.string(forKey: SettingsKey.defaultTargetID)
-        )
-        _unknownTargetID = State(initialValue: resolution.unknownID)
-        _session = State(initialValue: EditorSession(
-            text: document.wrappedValue.file.body,
-            target: resolution.target,
-            model: OllamaClient()
-        ))
+        _session = State(initialValue: EditorSession(text: document.wrappedValue.file.body, model: OllamaClient()))
     }
 
     var body: some View {
@@ -71,7 +62,7 @@ struct DocumentView: View {
                 .help("How much text is evaluated. Selecting two or more words evaluates just the Selection.")
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                TargetMenu(catalog: catalog, selection: session.target, choose: choose)
+                TargetMenu(catalog: customTargets.catalog, selection: session.target, choose: choose)
                 Button {
                     showsStyleBrief.toggle()
                 } label: {
@@ -79,10 +70,16 @@ struct DocumentView: View {
                 }
                 .help("Show the Style Brief for \(session.target.name)")
                 .popover(isPresented: $showsStyleBrief) {
-                    StyleBriefView(target: session.target)
+                    StyleBriefView(target: session.target) {
+                        showsStyleBrief = false
+                        choose(customTargets.duplicate(session.target))
+                        openWindow(id: CustomTargetsWindow.id)
+                    }
                 }
             }
         }
+        .onAppear(perform: resolveTarget)
+        .onChange(of: customTargets.targets) { _, _ in followCustomTargetChanges() }
         .onChange(of: environment.state, initial: true) { _, state in
             guard state == .ready else { return }
             session.model = environment.client
@@ -92,6 +89,26 @@ struct DocumentView: View {
             if case .failed(let failure) = status {
                 environment.evaluationFailed(failure)
             }
+        }
+    }
+
+    private var defaultTargetID: String? {
+        UserDefaults.standard.string(forKey: SettingsKey.defaultTargetID)
+    }
+
+    private func resolveTarget() {
+        let resolution = customTargets.catalog.resolve(storedID: document.file.targetID, defaultID: defaultTargetID)
+        session.target = resolution.target
+        unknownTargetID = resolution.unknownID
+    }
+
+    /// Keeps the session's copy of a Custom Target current, and falls back if it was deleted.
+    private func followCustomTargetChanges() {
+        guard !session.target.isBuiltIn else { return }
+        if let updated = customTargets.catalog.target(id: session.target.id) {
+            session.target = updated
+        } else {
+            resolveTarget()
         }
     }
 
