@@ -61,8 +61,9 @@ create-dmg \
   "$DMG" \
   "$STAGING"
 
-echo "==> Ad-hoc signing DMG"
-codesign --force --sign - "$DMG"
+# Leave the DMG unsigned: macOS checks a signed disk image when it's opened and
+# blocks an ad-hoc signature, whereas an unsigned one opens and only the app is
+# checked, where Privacy & Security offers Open Anyway.
 hdiutil verify "$DMG"
 
 (cd "$DIST" && shasum -a 256 "$(basename "$DMG")" > "$(basename "$DMG").sha256")
