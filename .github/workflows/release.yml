@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    # macOS 26 / Xcode 26: the app's deployment target and Swift tools version need them.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Test ScribeCore
+        working-directory: ScribeCore
+        run: swift test
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      # Tag v1.2.0 → app version 1.2.0; manual runs keep the project's version.
+      - name: Build, sign and package
+        run: |
+          version=""
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          scripts/package-dmg.sh "$version"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScribeAI-macOS
+          path: |
+            dist/ScribeAI-macOS.dmg
+            dist/ScribeAI-macOS.dmg.sha256
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: .github/release-notes.md
+          files: |
+            dist/ScribeAI-macOS.dmg
+            dist/ScribeAI-macOS.dmg.sha256
